@@ -20,9 +20,9 @@ Claude Code reads this file and stops to ask if a value it needs is blank.
 - Owner: DevJarvis11
 - App repository: DevJarvis11/FaultLine
 - GitOps repository: DevJarvis11/faultline-gitops
-- Repository visibility (public or private): private
-- GitHub App ID:
-- GitHub App installation ID:
+- Repository visibility (public or private): private (both; faultline-gitops made private by the owner 2026-11-15)
+- GitHub App ID: 5767878
+- GitHub App installation ID: 182155611
 - GitHub App private key path on the VM:
 
 ## Model server (values in config/models.yaml; the URL and the API key go only in .env, never here)
@@ -41,4 +41,5 @@ Claude Code reads this file and stops to ask if a value it needs is blank.
   - :
 
 ## Lab
-- Lab hostname for the shop:
+- Lab hostname for the shop: shop.faultline.lab (lab-only name via /etc/hosts; Traefik web entry point is :8000)
+- Argo CD access to faultline-gitops: read-only SSH deploy key (owner's choice 2026-11-15); private key only in an Argo CD repo Secret

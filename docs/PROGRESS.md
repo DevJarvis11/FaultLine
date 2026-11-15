@@ -1,8 +1,14 @@
 # Progress
 
-Resume point: Session 3, first task (Sessions 1-2 done; cluster-free parts of 5-7 merged from the parallel track).
+Resume point: Session 3, tasks 1-2 running (Sessions 1-2 done; cluster-free parts of 5-7 merged from the parallel track).
 
 Parallel track (owner approved 2026-11-15, an exception to "one session at a time"): builder in a git worktree builds the cluster-free parts of Sessions 5 to 7 (OPA policies and client, migration code, models.yaml, model client, check-models, redaction, size limits, evidence IDs). It merges into main after Session 2. Live checks (migrate, the llm_calls row, packs on live data) stay with their sessions.
+
+## Session 3 plan (GitOps, app, observability, Opus)
+Owner inputs (2026-11-15): lab hostname shop.faultline.lab; faultline-gitops now private; Argo CD reads it with a read-only SSH deploy key.
+1. Argo CD via Helm in `argocd` (Dex, notifications, ApplicationSet off); deploy key; `faultline-gitops` layout (apps/boutique, apps/ingress, apps/policies, argocd/); Online Boutique pinned release without loadgenerator and frontend-external; guard middlewares, IngressRoute (web) and TLS route (websecure, secret boutique-tls created out of Git) (builder A).
+2. kube-prometheus-stack (Grafana off), blackbox exporter, Loki single binary, Alloy in `monitoring`; scrape Traefik, Hubble, CoreDNS, kubelet; probe the shop (builder B, in parallel with A).
+3. Owner adds `shop.faultline.lab` to /etc/hosts (sudo). Done-when: shop loads via the hostname; metrics and access logs queryable; probe succeeds.
 
 ## Session 2 plan (Cluster base, Opus)
 1. Kernel gate: owner runs `sudo modprobe -a sch_ingress cls_bpf algif_hash` (pending in INPUTS). Stop if it fails.
@@ -24,7 +30,7 @@ Parallel track (owner approved 2026-11-15, an exception to "one session at a tim
 | 0 Prerequisites (owner) | done | Filled in by the owner before starting |
 | 1 Repository scaffold | done | 5 commits f870c1d..76c99ae; CI green run 43725339525 |
 | 2 Cluster base | done | Cilium 1.20.4, Traefik 42.4.0; native Docker Engine 29.9.3 replaced Docker Desktop integration (owner's choice) |
-| 3 GitOps, app, observability | not started | |
+| 3 GitOps, app, observability | in progress | |
 | 4 Security and scenario tooling | not started | |
 | 5 Data, policy, LLMOps | partial | OPA policies, client, migration code merged; Postgres, OPA server, MLflow, live migrate pending |
 | 6 Model layer | partial | models.yaml, client, check-models merged (live gateway check passed); llm_calls DB row and plan-then-execute pending |
