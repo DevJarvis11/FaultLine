@@ -1,0 +1,59 @@
+# Argo CD Helm values for the Faultline lab.
+# Chart: argo/argo-cd 10.18.0 (repo https://argoproj.github.io/argo-helm), Argo CD v3.6.1.
+# Install:
+#   helm upgrade --install argocd argo/argo-cd --version 10.18.0 \
+#     --namespace argocd --create-namespace -f deploy/lab/argocd-values.yaml
+# Sources:
+#   Chart values: https://github.com/argoproj/argo-helm/blob/argo-cd-10.18.0/charts/argo-cd/values.yaml
+#     (checked with `helm show values argo/argo-cd --version 10.18.0`)
+#   Chart README (ApplicationSet controller "is always created"; no enabled flag):
+#     https://github.com/argoproj/argo-helm/blob/argo-cd-10.18.0/charts/argo-cd/README.md
+# Lean lab: Dex, notifications and the ApplicationSet controller are off.
+# The server stays ClusterIP with no ingress; Faultline reaches it in-cluster.
+
+global:
+  image:
+    repository: quay.io/argoproj/argocd
+    tag: v3.6.1
+  # The chart's per-component NetworkPolicies (default create: true) admit only pod
+  # sources, and under Cilium 1.20 that blocks kubelet probes from the host, so the
+  # repo server and controller never become ready. Lab-only: no Argo CD NetworkPolicies.
+  networkPolicy:
+    create: false
+
+dex:
+  enabled: false
+
+notifications:
+  enabled: false
+
+# The chart always renders the ApplicationSet Deployment; zero replicas means no pod.
+applicationSet:
+  replicas: 0
+
+redis:
+  image:
+    repository: ecr-public.aws.com/docker/library/redis
+    tag: 8.6.4-alpine
+  resources:
+    requests: {cpu: 20m, memory: 32Mi}
+    limits: {memory: 128Mi}
+
+controller:
+  resources:
+    requests: {cpu: 100m, memory: 192Mi}
+    limits: {memory: 512Mi}
+
+repoServer:
+  resources:
+    requests: {cpu: 50m, memory: 96Mi}
+    limits: {memory: 384Mi}
+
+server:
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: false
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 256Mi}

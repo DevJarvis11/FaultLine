@@ -1,0 +1,93 @@
+# Prometheus blackbox exporter Helm values for the Faultline lab (namespace monitoring).
+# Chart: prometheus-community/prometheus-blackbox-exporter 11.21.3 (blackbox_exporter v0.29.1).
+# Install:
+#   helm upgrade --install blackbox prometheus-community/prometheus-blackbox-exporter \
+#     --version 11.21.3 --namespace monitoring -f deploy/lab/blackbox-exporter-values.yaml
+# Sources:
+#   Chart values: `helm show values prometheus-community/prometheus-blackbox-exporter --version 11.21.3`
+#   Module config: https://github.com/prometheus/blackbox_exporter/blob/v0.29.1/CONFIGURATION.md
+#     (headers, valid_status_codes, tls_config.insecure_skip_verify, tls_config.server_name);
+#     prober/http.go sets request.Host from a "Host" header.
+#   Probe CRD fields: `kubectl explain probe.spec` on the live cluster (operator v0.95.2).
+#
+# Why probe Traefik's Service with a Host header: pods have no /etc/hosts entry for
+# shop.faultline.lab, and a CoreDNS override would change kube-system. The Traefik
+# Service (ingress/traefik, port 80 -> entry point web :8000, port 443 -> websecure :8443)
+# is the same Traefik that serves http://shop.faultline.lab:8000/, and the IngressRoute
+# matches on Host(`shop.faultline.lab`), so the probe exercises the same route.
+
+image:
+  tag: v0.29.1
+
+resources:
+  requests: {cpu: 5m, memory: 16Mi}
+  limits: {memory: 48Mi}
+
+config:
+  modules:
+    # The shop through Traefik's web entry point; success means a 2xx.
+    shop_http:
+      prober: http
+      timeout: 5s
+      http:
+        method: GET
+        valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+        follow_redirects: true
+        preferred_ip_protocol: ip4
+        headers:
+          Host: shop.faultline.lab
+    # Traefik's websecure entry point; exists so probe_ssl_earliest_cert_expiry is
+    # exported. The certificate is self-signed, so verification is skipped. 404 is
+    # also accepted so the cert probe does not depend on a websecure route existing
+    # (live: IngressRoute boutique-tls serves the shop on websecure with 200).
+    shop_https_cert:
+      prober: http
+      timeout: 5s
+      http:
+        method: GET
+        valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+        valid_status_codes: [200, 404]
+        follow_redirects: false
+        fail_if_not_ssl: true
+        preferred_ip_protocol: ip4
+        headers:
+          Host: shop.faultline.lab
+        tls_config:
+          insecure_skip_verify: true
+          server_name: shop.faultline.lab
+
+extraManifests:
+  - apiVersion: monitoring.coreos.com/v1
+    kind: Probe
+    metadata:
+      name: shop-http
+      namespace: monitoring
+    spec:
+      interval: 30s
+      module: shop_http
+      prober:
+        url: blackbox-prometheus-blackbox-exporter.monitoring.svc:9115
+        path: /probe
+      targets:
+        staticConfig:
+          static:
+            - http://traefik.ingress.svc.cluster.local/
+          labels:
+            public_url: http://shop.faultline.lab:8000/
+  - apiVersion: monitoring.coreos.com/v1
+    kind: Probe
+    metadata:
+      name: shop-https
+      namespace: monitoring
+    spec:
+      interval: 60s
+      module: shop_https_cert
+      prober:
+        url: blackbox-prometheus-blackbox-exporter.monitoring.svc:9115
+        path: /probe
+      targets:
+        staticConfig:
+          static:
+            - https://traefik.ingress.svc.cluster.local/
+          labels:
+            public_url: https://shop.faultline.lab:8443/

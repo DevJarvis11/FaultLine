@@ -1,0 +1,95 @@
+# Loki Helm values for the Faultline lab (namespace monitoring): single binary,
+# filesystem storage, no gateway, caches, canary or tests.
+# Chart: grafana/loki 7.6.0 (appVersion 3.6.18).
+# Install:
+#   helm upgrade --install loki grafana/loki --version 7.6.0 \
+#     --namespace monitoring -f deploy/lab/loki-values.yaml
+# Sources:
+#   Chart values and templates: `helm show values grafana/loki --version 7.6.0`;
+#     templates/_helpers.tpl accepts deploymentMode "SingleBinary".
+#   Monolithic install: https://grafana.com/docs/loki/latest/setup/install/helm/install-monolithic/
+#   Retention: https://grafana.com/docs/loki/v3.6.x/operations/storage/retention/
+#     (compactor.retention_enabled, compactor.delete_request_store, limits_config.retention_period)
+
+deploymentMode: SingleBinary
+
+loki:
+  image:
+    tag: 3.6.18
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+  limits_config:
+    allow_structured_metadata: true
+    volume_enabled: true
+    retention_period: 72h
+  compactor:
+    retention_enabled: true
+    delete_request_store: filesystem
+  pattern_ingester:
+    enabled: false
+
+singleBinary:
+  replicas: 1
+  resources:
+    requests: {cpu: 50m, memory: 192Mi}
+    limits: {memory: 512Mi}
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: local-path
+
+# Zero out the other deployment modes.
+backend:
+  replicas: 0
+read:
+  replicas: 0
+write:
+  replicas: 0
+ingester:
+  replicas: 0
+querier:
+  replicas: 0
+queryFrontend:
+  replicas: 0
+queryScheduler:
+  replicas: 0
+distributor:
+  replicas: 0
+compactor:
+  replicas: 0
+indexGateway:
+  replicas: 0
+bloomPlanner:
+  replicas: 0
+bloomBuilder:
+  replicas: 0
+bloomGateway:
+  replicas: 0
+
+# Lean lab: no gateway (clients use the loki Service on 3100), no memcached caches,
+# no canary, no helm test pod, no rules sidecar.
+gateway:
+  enabled: false
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
+sidecar:
+  rules:
+    enabled: false

@@ -1,0 +1,172 @@
+# kube-prometheus-stack Helm values for the Faultline lab (namespace monitoring).
+# Chart: prometheus-community/kube-prometheus-stack 93.3.0 (operator v0.95.2).
+# Install:
+#   helm upgrade --install kps prometheus-community/kube-prometheus-stack --version 93.3.0 \
+#     --namespace monitoring --create-namespace -f deploy/lab/kube-prometheus-stack-values.yaml
+# Sources:
+#   Chart values: `helm show values prometheus-community/kube-prometheus-stack --version 93.3.0`
+#     (https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack)
+#   k3s components: live check `ss -ltn` on the node: kube-scheduler (10259),
+#     kube-controller-manager (10257) and kube-proxy (10249) listen on 127.0.0.1 only;
+#     no etcd (k3s uses SQLite/kine by default); kubelet listens on *:10250.
+#     https://docs.k3s.io/reference/server-config (bind-address args) -- not changed here.
+# Images (tags set below, or pinned by the chart version and checked with helm template):
+#   prometheus v3.16.0-distroless, alertmanager v0.35.0, prometheus-operator and
+#   config-reloader v0.95.2, kube-state-metrics v2.20.0, node-exporter v1.12.1-distroless,
+#   kube-webhook-certgen 1.11.1.
+
+# Lean lab: no Grafana (Faultline queries Prometheus and Loki directly).
+grafana:
+  enabled: false
+
+# k3s runs these inside the k3s process bound to 127.0.0.1, so they are unscrapable
+# from pods; disable rather than leave failing targets.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false
+
+defaultRules:
+  rules:
+    etcd: false
+    kubeControllerManager: false
+    kubeProxy: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    windows: false
+
+# CoreDNS on k3s: pod label k8s-app=kube-dns, metrics on 9153 (live: svc kube-system/kube-dns).
+# Chart default selector k8s-app=kube-dns matches.
+coreDns:
+  enabled: true
+  service:
+    port: 9153
+    targetPort: 9153
+
+# kubelet and cAdvisor through the operator-managed kubelet Service (kube-system, :10250).
+# k3s quirk (live): the kubelet /metrics endpoint is served by the single k3s process and
+# also exposes apiserver, etcd (kine), scheduler and workqueue metrics (about 70k series),
+# duplicating the apiserver job. Drop those families from the kubelet job; kubelet_* and
+# the chart's default rule (first entry, copied from chart defaults) stay.
+kubelet:
+  enabled: true
+  serviceMonitor:
+    cAdvisor: true
+    metricRelabelings:
+      - action: drop
+        sourceLabels: [__name__, le]
+        regex: (csi_operations|storage_operation_duration)_seconds_bucket;(0.25|2.5|15|25|120|600)(\.0)?
+      - action: drop
+        sourceLabels: [__name__]
+        regex: (apiserver|etcd|scheduler|workqueue|rest_client|watch_cache|aggregator|apiextensions|authentication|authorization|kine|node_authorizer|field_validation)_.+
+
+# Same k3s process on :6443: keep apiserver_request_* (used by default rules), drop
+# other components' families and the largest non-request histograms.
+kubeApiServer:
+  enabled: true
+  serviceMonitor:
+    metricRelabelings:
+      - action: drop
+        regex: (etcd_request|apiserver_request_slo|apiserver_request_sli|apiserver_request)_duration_seconds_bucket;(0\.15|0\.2|0\.3|0\.35|0\.4|0\.45|0\.6|0\.7|0\.8|0\.9|1\.25|1\.5|1\.75|2|3|3\.5|4|4\.5|6|7|8|9|15|20|40|45|50)(\.0)?
+        sourceLabels: [__name__, le]
+      - action: drop
+        sourceLabels: [__name__]
+        regex: (scheduler|workqueue|rest_client|kine|watch_cache)_.+|apiserver_(watch|storage|response_sizes|request_body_size|watch_cache|watch_list).*_bucket
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    image:
+      tag: v0.35.0
+    retention: 24h
+    resources:
+      requests: {cpu: 10m, memory: 32Mi}
+      limits: {memory: 64Mi}
+
+prometheusOperator:
+  image:
+    tag: v0.95.2
+  resources:
+    requests: {cpu: 20m, memory: 48Mi}
+    limits: {memory: 128Mi}
+  prometheusConfigReloader:
+    resources:
+      requests: {cpu: 5m, memory: 16Mi}
+      limits: {memory: 32Mi}
+
+kube-state-metrics:
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {memory: 96Mi}
+
+# node-exporter on the host network uses :9100 (Traefik moved its metrics to :9101).
+prometheus-node-exporter:
+  # WSL2: "/" is not a shared or slave mount, so HostToContainer propagation fails
+  # with CreateContainerError (live). None is a valid value (subchart 5.1.0 values.yaml,
+  # https://kubernetes.io/docs/concepts/storage/volumes/#mount-propagation).
+  hostRootFsMount:
+    enabled: true
+    mountPropagation: None
+  resources:
+    requests: {cpu: 10m, memory: 16Mi}
+    limits: {memory: 48Mi}
+
+prometheus:
+  prometheusSpec:
+    image:
+      tag: v3.16.0-distroless
+    retention: 2d
+    retentionSize: 3GB
+    scrapeInterval: 30s
+    resources:
+      requests: {cpu: 100m, memory: 384Mi}
+      limits: {memory: 1Gi}
+    # Pick up ServiceMonitors, PodMonitors, Probes and rules from any release/namespace.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    scrapeConfigSelectorNilUsesHelmValues: false
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 4Gi
+
+  # Hubble metrics: Cilium chart's headless Service kube-system/hubble-metrics
+  # (label k8s-app=hubble, port name hubble-metrics, 9965). Live check: kubectl get svc.
+  additionalServiceMonitors:
+    - name: hubble
+      selector:
+        matchLabels:
+          k8s-app: hubble
+      namespaceSelector:
+        matchNames: [kube-system]
+      endpoints:
+        - port: hubble-metrics
+          interval: 30s
+          relabelings:
+            - sourceLabels: [__meta_kubernetes_pod_node_name]
+              targetLabel: node
+
+  # Traefik metrics: pod port "metrics" (9101) on the host network; Traefik's Service
+  # does not expose it. Pod labels from live pod ingress/traefik-*.
+  additionalPodMonitors:
+    - name: traefik
+      selector:
+        matchLabels:
+          app.kubernetes.io/name: traefik
+          app.kubernetes.io/instance: traefik-ingress
+      namespaceSelector:
+        matchNames: [ingress]
+      podMetricsEndpoints:
+        - port: metrics
+          path: /metrics
+          interval: 30s

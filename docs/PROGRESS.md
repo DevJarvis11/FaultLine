@@ -1,6 +1,6 @@
 # Progress
 
-Resume point: Session 3, tasks 1-2 running (Sessions 1-2 done; cluster-free parts of 5-7 merged from the parallel track).
+Resume point: Session 3, step 3: owner adds `172.19.0.1 shop.faultline.lab` to /etc/hosts, then rerun deploy/lab/check-shop.sh and mark Session 3 done; next Session 4 (Sessions 1-2 done; cluster-free parts of 5-7 merged from the parallel track).
 
 Parallel track (owner approved 2026-11-15, an exception to "one session at a time"): builder in a git worktree builds the cluster-free parts of Sessions 5 to 7 (OPA policies and client, migration code, models.yaml, model client, check-models, redaction, size limits, evidence IDs). It merges into main after Session 2. Live checks (migrate, the llm_calls row, packs on live data) stay with their sessions.
 
@@ -30,7 +30,7 @@ Owner inputs (2026-11-15): lab hostname shop.faultline.lab; faultline-gitops now
 | 0 Prerequisites (owner) | done | Filled in by the owner before starting |
 | 1 Repository scaffold | done | 5 commits f870c1d..76c99ae; CI green run 43725339525 |
 | 2 Cluster base | done | Cilium 1.20.4, Traefik 42.4.0; native Docker Engine 29.9.3 replaced Docker Desktop integration (owner's choice) |
-| 3 GitOps, app, observability | in progress | |
+| 3 GitOps, app, observability | in progress | All checks pass via --resolve; /etc/hosts line pending (owner sudo) |
 | 4 Security and scenario tooling | not started | |
 | 5 Data, policy, LLMOps | partial | OPA policies, client, migration code merged; Postgres, OPA server, MLflow, live migrate pending |
 | 6 Model layer | partial | models.yaml, client, check-models merged (live gateway check passed); llm_calls DB row and plan-then-execute pending |
@@ -60,6 +60,14 @@ Owner inputs (2026-11-15): lab hostname shop.faultline.lab; faultline-gitops now
 - Done-when (after native Docker): `deploy/lab/check-client-ip.sh` -> ClientHost 172.20.0.2 and 172.21.0.2, PASS: 2 distinct client IPs (target is the docker0 gateway; WSL2 runs mirrored-style interfaces eth2 192.168.1.8). `cilium status`: Cilium OK, Operator OK. `hubble observe --last 3` inside the agent shows FORWARDED flows. Pod DNS and egress work after Docker's iptables changes (busybox test pod). Memory: 3.8G used, 6.6G available.
 - Merge of the parallel track (db0466c): ruff clean, mypy clean (17 files), pytest 159 passed, opa test 11/11.
 
+### Session 3 (2026-11-15, Opus)
+- Argo CD chart 10.18.0 (v3.6.1, Redis 8.6.4-alpine) in `argocd`: Dex and notifications off; ApplicationSet has no off switch ("always created"), so replicas 0; `global.networkPolicy.create: false` (the chart's own policies blocked kubelet probes under Cilium, repo-server crash-looped). Repo Secret `argocd/faultline-gitops-repo` holds the read-only deploy key `argocd-readonly` (GitHub read_only=true); local key shredded. `argocd-initial-admin-secret` still present (remove after the Session 10 account exists).
+- faultline-gitops d860d25: apps/boutique (Online Boutique v0.10.7, all images :v0.10.7, redis-cart pinned to redis 8.6.4-alpine; loadgenerator and frontend-external removed), apps/ingress (checkout-guard, site-guard, web IngressRoute per spec, websecure route on `boutique-tls`), apps/policies (README), argocd/ (app-of-apps root + 3 Applications, automated sync). `boutique` namespace and self-signed `boutique-tls` (to 2027-11-15) created with kubectl, outside Git.
+- Monitoring: kube-prometheus-stack 93.3.0 (Prometheus v3.16.0, 2d/3GB, Grafana off; k3s scheduler/controller-manager/kube-proxy/etcd scraping disabled, they listen on 127.0.0.1 only; kubelet/apiserver series dropped 137k->42k per scrape; node-exporter `hostRootFsMount.mountPropagation: None` for WSL2), blackbox 11.21.3 (v0.29.1), Loki 7.6.0 single binary (3.6.18, 72h), Alloy 1.16.0 (v1.22.0; ClusterRole reduced to pods, pods/log, namespaces; drops chaos-mesh logs). Probes hit `traefik.ingress.svc` with Host shop.faultline.lab (no CoreDNS change).
+- Main-session checks: 4 Applications Synced/Healthy; `curl --resolve shop.faultline.lab:8000:172.19.0.1` -> 200; probe_success 1,1; count(coredns_dns_responses_total)=2; count(traefik_service_requests_total)=6; no targets down; Loki access lines in 30m = 61. ruff clean, mypy clean (17 files), pytest 159 passed, opa 11/11. Memory 6.1G used, 4.4G available.
+- Service URLs: PROMETHEUS_URL=http://kps-kube-prometheus-stack-prometheus.monitoring.svc:9090, LOKI_URL=http://loki.monitoring.svc:3100, ARGOCD_URL=https://argocd-server.argocd.svc.cluster.local (not yet copied into .env.example).
+- Open: Hubble metrics carry no flow-namespace label; the `hubble_drop_total{namespace=...}` template needs Cilium `hubble.metrics.enabled` context options (e.g. `drop:sourceContext=namespace;destinationContext=namespace`), a change to the Session 2 Cilium release: owner to approve before Session 7. Hubble already shows ~2680 POLICY_DENIED drops (unexplained). Any Cilium policy in apps/policies must allow host/kubelet traffic. Builder A ran `gh auth setup-git`, which changed the owner's global ~/.gitconfig credential helper. Alerts pending: NodeClockSkewDetected (WSL2 clock), KubePodCrashLooping (Alloy early restarts).
+
 ### Parallel track (Sessions 5-7, cluster-free; merged into main as db0466c)
 - Commits ba6a516 (S5 OPA policies + client), 4ae9bce (S6 models.yaml + loader), 8d807fe (S5 migrations + migrate), 02ab247 (S7 redaction, size limits, evidence IDs), e5415eb (S6 client, check-models, llm_calls).
 - Main session re-ran checks in the worktree: ruff clean; mypy clean (17 files); pytest 159 passed; opa test 11/11.
@@ -77,6 +85,12 @@ Owner inputs (2026-11-15): lab hostname shop.faultline.lab; faultline-gitops now
 - enableDefaultDeny: not a Helm value. It is a CiliumNetworkPolicy field, spec.enableDefaultDeny (cilium.io/v2), per `kubectl explain` on the live CRD.
 - k3s flags `--flannel-backend=none --disable-network-policy --disable=traefik` (https://docs.k3s.io/cli/server , https://docs.cilium.io/en/stable/installation/k3s/); INSTALL_K3S_VERSION is read by the get.k3s.io script.
 - Traefik (Sessions 2/3): accessLog.format json plus fields.headers.names User-Agent=keep gives field `request_User-Agent`; CRD group traefik.io/v1alpha1; entry points as above. Source: https://doc.traefik.io/traefik/reference/install-configuration/observability/logs-and-accesslogs/ , `helm show values traefik/traefik --version 42.4.0`.
+
+- Online Boutique v0.10.7 (Session 3; https://github.com/GoogleCloudPlatform/microservices-demo/releases, release/kubernetes-manifests.yaml): services ad, cart, checkout, currency, email, frontend, payment, productcatalog, recommendation, shipping, redis-cart; frontend calls productcatalog, currency, cart, recommendation, shipping, checkout, ad; checkout calls productcatalog, shipping, payment, email, currency, cart via PRODUCT_CATALOG/SHIPPING/PAYMENT/EMAIL/CURRENCY/CART_SERVICE_ADDR (src/checkoutservice/main.go:111-116); EXTRA_LATENCY supported (src/productcatalogservice/server.go:88); `/cart/checkout` is POST only (src/frontend/main.go:157).
+- Traefik v3 rule priority = rule length by default, so the checkout rule wins (https://doc.traefik.io/traefik/reference/routing-configuration/http/routing/rules-and-priority/); seen live as a separate router. Prometheus service metrics: `traefik_service_requests_total` labels code, method, protocol, service; frontend service value `boutique-boutique-<hash>@kubernetescrd` (and `-tls-` variant), selector `service=~"boutique-boutique(-tls)?-.+@kubernetescrd"`.
+- kube-prometheus-stack on k3s: CoreDNS via k8s-app=kube-dns :9153; kubelet/cAdvisor :10250; scheduler/controller-manager/kube-proxy bound to 127.0.0.1, no etcd (`ss -ltn`). Live metrics present: kube_pod_container_status_restarts_total, kube_pod_status_ready (condition), kube_deployment_status_replicas_unavailable (deployment), container_cpu_usage_seconds_total (namespace, pod, container), coredns_dns_responses_total (rcode), hubble_drop_total (reason, protocol), hubble_flows_processed_total (type, subtype, verdict), probe_success / probe_duration_seconds / probe_ssl_earliest_cert_expiry (public_url). Source: `helm show values kube-prometheus-stack --version 93.3.0`, live queries.
+- Loki/Alloy: Traefik access-log selector `{namespace="ingress", container="traefik", log_type="access"}`; after `| json`: ClientHost, RequestPath, RequestMethod, DownstreamStatus, Duration (ns string), and `request_User_Agent` (Loki turns the hyphen into an underscore). Sources: Loki v3.6 docs, Alloy v1.22.0 loki.source.kubernetes / loki.process docs, live queries.
+- Argo CD: Service `argocd-server` (80/443); repo Secret and CreateNamespace format from https://argo-cd.readthedocs.io/en/stable/operator-manual/declarative-setup/ and /user-guide/sync-options/.
 
 ## Blocked
 <!-- Item, file, what it needed, why blocked. -->

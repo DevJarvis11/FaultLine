@@ -1,0 +1,108 @@
+# Grafana Alloy Helm values for the Faultline lab (namespace monitoring): ships all pod
+# logs (except chaos-mesh) to Loki and labels Traefik's JSON access-log lines.
+# Chart: grafana/alloy 1.16.0 (Alloy v1.22.0).
+# Install:
+#   helm upgrade --install alloy grafana/alloy --version 1.16.0 \
+#     --namespace monitoring -f deploy/lab/alloy-values.yaml
+# Sources:
+#   Chart values: `helm show values grafana/alloy --version 1.16.0`
+#   Components (v1.22.0 docs, all general-availability):
+#     https://github.com/grafana/alloy/blob/v1.22.0/docs/sources/reference/components/loki/loki.source.kubernetes.md
+#     https://github.com/grafana/alloy/blob/v1.22.0/docs/sources/reference/components/loki/loki.process.md
+#       (stage.match selector takes a stream selector plus line filters; stage.static_labels)
+#
+# Stream labels: namespace, pod, container, app, job="<namespace>/<container>".
+# Traefik writes its own log as coloured text and access logs as JSON on the same stdout,
+# so JSON access-log lines get log_type="access". Stable selector for access logs:
+#   {namespace="ingress", container="traefik", log_type="access"}
+# The chaos-mesh namespace is dropped: Faultline must not see it (CLAUDE.md safety rules).
+
+image:
+  tag: v1.22.0
+
+controller:
+  # loki.source.kubernetes tails through the API server, so one replica covers the cluster.
+  type: deployment
+  replicas: 1
+
+crds:
+  # PodLogs CRD is not used.
+  create: false
+
+rbac:
+  create: true
+  # Least privilege for pod discovery and log tailing (chart default also reads Secrets).
+  rules:
+    - apiGroups: [""]
+      resources: ["pods", "pods/log", "namespaces"]
+      verbs: ["get", "list", "watch"]
+
+alloy:
+  enableReporting: false
+  resources:
+    requests: {cpu: 20m, memory: 96Mi}
+    limits: {memory: 256Mi}
+  configMap:
+    create: true
+    content: |
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      discovery.relabel "pods" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          regex         = "chaos-mesh"
+          action        = "drop"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app"]
+          target_label  = "app"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          regex         = "(.+)"
+          target_label  = "app"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          target_label  = "job"
+        }
+      }
+
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.pods.output
+        forward_to = [loki.process.pods.receiver]
+      }
+
+      loki.process "pods" {
+        forward_to = [loki.write.default.receiver]
+
+        stage.match {
+          selector = "{namespace=\"ingress\", container=\"traefik\"} |= \"RequestMethod\""
+          stage.static_labels {
+            values = { log_type = "access" }
+          }
+        }
+      }
+
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"
+        }
+      }

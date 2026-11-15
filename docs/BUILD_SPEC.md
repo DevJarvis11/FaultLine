@@ -1284,9 +1284,9 @@ These facts change between releases, so Claude Code confirms each one from curre
 
 - [x] k3s install flags for disabling flannel, the built-in network policy controller and bundled Traefik (Session 2)
 - [x] Cilium Helm values: Hubble metrics list (drop, flow, dns), kube-proxy replacement, load-balancer IPs; support for `enableDefaultDeny` (Session 2)
-- [ ] Traefik Helm values: JSON access logs, keeping the User-Agent header, Prometheus service metrics; CRD group; entry point names; rule priority (Sessions 2 and 3)
+- [x] Traefik Helm values: JSON access logs, keeping the User-Agent header, Prometheus service metrics; CRD group; entry point names; rule priority (Sessions 2 and 3)
 - [x] Client-IP preservation method that works on this WSL2 setup (Session 2)
-- [ ] Online Boutique: current release manifests, service list, call graph, `EXTRA_LATENCY` support on productcatalogservice, upstream address variables on checkoutservice, the `/cart/checkout` route (Session 3)
+- [x] Online Boutique: current release manifests, service list, call graph, `EXTRA_LATENCY` support on productcatalogservice, upstream address variables on checkoutservice, the `/cart/checkout` route (Session 3)
 - [ ] kube-prometheus-stack: CoreDNS and kubelet scraping on k3s; exact metric and label names used by the collectors (Sessions 3 and 7)
 - [ ] Loki and Alloy: stream labels for Traefik and Falco logs; field names in Traefik's JSON log (Sessions 3 and 7)
 - [ ] Falco: driver that works on the WSL2 kernel (the modern eBPF driver needs kernel 5.8 or later and BTF); k3s containerd socket path; Falcosidekick Loki output (Session 4)
