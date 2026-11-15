@@ -1,8 +1,13 @@
 # Progress
 
-Resume point: Session 4, first task (Session 3 done) (Sessions 1-2 done; cluster-free parts of 5-7 merged from the parallel track).
+Resume point: Session 5, first task (Session 4 done; Session 5 cluster-free parts already merged) (Sessions 1-2 done; cluster-free parts of 5-7 merged from the parallel track).
 
 Parallel track (owner approved 2026-11-15, an exception to "one session at a time"): builder in a git worktree builds the cluster-free parts of Sessions 5 to 7 (OPA policies and client, migration code, models.yaml, model client, check-models, redaction, size limits, evidence IDs). It merges into main after Session 2. Live checks (migrate, the llm_calls row, packs on live data) stay with their sessions.
+
+## Session 4 plan (Security and scenario tooling, Opus)
+1. Falco (modern eBPF driver, k3s containerd socket /run/k3s/containerd/containerd.sock) and Falcosidekick to Loki, in `security`. Stop and ask if Falco cannot start on WSL2 (builder A).
+2. Dedicated Docker bridge network for traffic generators; k6 organic (browsing sessions) and flood (one endpoint) scripts, lab-only target guard, 20 containers (builder B, in parallel).
+3. Done-when: a Falco event (real rule trigger) in Loki; 20 distinct ClientHost values in Loki for a 20-container k6 organic run.
 
 ## Session 3 plan (GitOps, app, observability, Opus)
 Owner inputs (2026-11-15): lab hostname shop.faultline.lab; faultline-gitops now private; Argo CD reads it with a read-only SSH deploy key.
@@ -31,7 +36,7 @@ Owner inputs (2026-11-15): lab hostname shop.faultline.lab; faultline-gitops now
 | 1 Repository scaffold | done | 5 commits f870c1d..76c99ae; CI green run 43725339525 |
 | 2 Cluster base | done | Cilium 1.20.4, Traefik 42.4.0; native Docker Engine 29.9.3 replaced Docker Desktop integration (owner's choice) |
 | 3 GitOps, app, observability | done | Shop at http://shop.faultline.lab:8000 (/etc/hosts 172.19.0.1); Argo CD 3.6.1, kps 93.3.0, Loki 3.6.18, Alloy 1.22.0 |
-| 4 Security and scenario tooling | not started | |
+| 4 Security and scenario tooling | done | Falco 0.45.2 modern eBPF; k6 2.4.0 on fl-traffic 172.31.250.0/24 |
 | 5 Data, policy, LLMOps | partial | OPA policies, client, migration code merged; Postgres, OPA server, MLflow, live migrate pending |
 | 6 Model layer | partial | models.yaml, client, check-models merged (live gateway check passed); llm_calls DB row and plan-then-execute pending |
 | 7 Evidence | partial | redaction, size limits, evidence IDs merged; collectors, traffic shape, live packs pending |
@@ -59,6 +64,14 @@ Owner inputs (2026-11-15): lab hostname shop.faultline.lab; faultline-gitops now
 
 - Done-when (after native Docker): `deploy/lab/check-client-ip.sh` -> ClientHost 172.20.0.2 and 172.21.0.2, PASS: 2 distinct client IPs (target is the docker0 gateway; WSL2 runs mirrored-style interfaces eth2 192.168.1.8). `cilium status`: Cilium OK, Operator OK. `hubble observe --last 3` inside the agent shows FORWARDED flows. Pod DNS and egress work after Docker's iptables changes (busybox test pod). Memory: 3.8G used, 6.6G available.
 - Merge of the parallel track (db0466c): ruff clean, mypy clean (17 files), pytest 159 passed, opa test 11/11.
+
+### Session 4 (2026-11-15, Opus)
+- Falco chart 9.2.2 (falco 0.45.2, container plugin 0.7.6) in `security`, `driver.kind: modern_ebpf` (log: "Opening 'syscall' source with modern BPF probe."), CRI socket /run/k3s/containerd/containerd.sock via `collectors.containerEngine.engines.cri.sockets` (Docker engine off), `cpusForEachBuffer: 8`; falcoctl install/follow off (image's bundled rules, no floating falco-rules artifact). Falcosidekick 2.35.1 (subchart 0.14.1), 1 replica, no UI/Redis, Loki output hostport http://loki.monitoring.svc:3100, format json. Falco 91Mi, sidekick 13Mi.
+- Falco done-when: `cat /etc/shadow` in a throwaway pod fired "Read sensitive file untrusted" (Warning); main session confirmed in Loki: `sum by (rule, priority) (count_over_time({source="syscall"}[3h]))` -> 1; scratch namespace deleted.
+- Traffic tooling: evals/scenarios/traffic/ (run.sh, organic.js, flood.js, lib/guard.js, README). grafana/k6:2.4.0; Docker network fl-traffic 172.31.250.0/24 (kept); 96MiB/0.5 CPU per container; guard refuses any host but shop.faultline.lab resolved to a local docker/bridge IP, and caps duration and rate.
+- k6 done-when: organic 20 containers x 90s -> 20 distinct ClientHost (main session re-query: 20); 48-62 req/client, 10-13 paths/client, 12 UAs (after a UA-assignment fix). Flood 20 x 30s at 5 req/s -> ~140 req/client, 1 path/client, 1 UA. Generator memory peak 236MiB; node MemAvailable low 3.79G.
+- Checks: ruff clean, mypy clean (17 files), pytest 159 passed, opa 11/11; `bash -n run.sh` ok (shellcheck not installed).
+- Open: "Terminal shell in container" needs a TTY (`kubectl exec -it`), relevant to the unrelated_shell decoy and scenario 12; Falco sends all priorities (debug and up), Faultline filters by min_priority; Falcosidekick `tags` label has a leading comma; organic runs overrun by up to 10s (graceful stop); scripts skip static assets.
 
 ### Session 3 (2026-11-15, Opus)
 - Argo CD chart 10.18.0 (v3.6.1, Redis 8.6.4-alpine) in `argocd`: Dex and notifications off; ApplicationSet has no off switch ("always created"), so replicas 0; `global.networkPolicy.create: false` (the chart's own policies blocked kubelet probes under Cilium, repo-server crash-looped). Repo Secret `argocd/faultline-gitops-repo` holds the read-only deploy key `argocd-readonly` (GitHub read_only=true); local key shredded. `argocd-initial-admin-secret` still present (remove after the Session 10 account exists).
@@ -93,6 +106,9 @@ Owner inputs (2026-11-15): lab hostname shop.faultline.lab; faultline-gitops now
 - kube-prometheus-stack on k3s: CoreDNS via k8s-app=kube-dns :9153; kubelet/cAdvisor :10250; scheduler/controller-manager/kube-proxy bound to 127.0.0.1, no etcd (`ss -ltn`). Live metrics present: kube_pod_container_status_restarts_total, kube_pod_status_ready (condition), kube_deployment_status_replicas_unavailable (deployment), container_cpu_usage_seconds_total (namespace, pod, container), coredns_dns_responses_total (rcode), hubble_drop_total (reason, protocol), hubble_flows_processed_total (type, subtype, verdict), probe_success / probe_duration_seconds / probe_ssl_earliest_cert_expiry (public_url). Source: `helm show values kube-prometheus-stack --version 93.3.0`, live queries.
 - Loki/Alloy: Traefik access-log selector `{namespace="ingress", container="traefik", log_type="access"}`; after `| json`: ClientHost, RequestPath, RequestMethod, DownstreamStatus, Duration (ns string), and `request_User_Agent` (Loki turns the hyphen into an underscore). Sources: Loki v3.6 docs, Alloy v1.22.0 loki.source.kubernetes / loki.process docs, live queries.
 - Argo CD: Service `argocd-server` (80/443); repo Secret and CreateNamespace format from https://argo-cd.readthedocs.io/en/stable/operator-manual/declarative-setup/ and /user-guide/sync-options/.
+
+- Falco (Session 4): modern eBPF driver works on 6.6.114.1-microsoft-standard-WSL2 (startup log); option list https://raw.githubusercontent.com/falcosecurity/falco/0.45.2/falco.yaml; container plugin socket setting https://github.com/falcosecurity/plugins/blob/main/plugins/container/README.md and chart 9.2.2 values/_helpers.tpl; Falcosidekick Loki output https://github.com/falcosecurity/falcosidekick/blob/2.35.1/docs/outputs/loki.md. Loki stream labels from Falcosidekick: rule, priority, source, tags, hostname, k8s_ns_name, k8s_pod_name; selector `{source="syscall"}` (Alloy's copy of Falco stdout is `{namespace="security", app="falco"}`). Fields after `| json`: output, time, uuid, output_fields_k8s_ns_name, output_fields_k8s_pod_name, output_fields_container_name, output_fields_proc_name, output_fields_proc_cmdline, output_fields_fd_name, output_fields_evt_type, output_fields_user_name.
+- k6 (Session 4): grafana/k6:2.4.0, Docker Hub tags API and https://github.com/grafana/k6/releases (v2.4.0, 2026-11-12).
 
 ## Blocked
 <!-- Item, file, what it needed, why blocked. -->

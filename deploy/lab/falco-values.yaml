@@ -1,0 +1,104 @@
+# Falco + Falcosidekick Helm values for the Faultline lab (namespace security).
+# Chart: falcosecurity/falco 9.2.2 (appVersion 0.45.2); Falcosidekick comes from the
+# chart's bundled falcosidekick subchart 0.14.1 (enabled with falcosidekick.enabled).
+# Install:
+#   helm repo add falcosecurity https://falcosecurity.github.io/charts
+#   helm upgrade --install falco falcosecurity/falco --version 9.2.2 \
+#     --namespace security --create-namespace -f deploy/lab/falco-values.yaml
+# Sources:
+#   Chart values and templates: `helm show values falcosecurity/falco --version 9.2.2`,
+#     templates/_helpers.tpl (driverLoader.enabled is false for modern_ebpf;
+#     falcosidekick.enabled sets json_output and http_output to the sidekick service;
+#     container engine sockets are mounted by directory under /host).
+#   Falco engine options: https://raw.githubusercontent.com/falcosecurity/falco/0.45.2/falco.yaml
+#     (engine.kind modern_ebpf; modern_ebpf.buf_size_preset 4 = 8 MB per buffer;
+#     cpus_for_each_buffer = CPUs sharing one ring buffer).
+#   Container plugin (bundled in Falco >= 0.41; engines and default sockets, incl. k3s):
+#     https://github.com/falcosecurity/plugins/blob/main/plugins/container/README.md
+#   Falcosidekick Loki output: https://github.com/falcosecurity/falcosidekick/blob/2.35.1/docs/outputs/loki.md
+#     and outputs/loki.go (stream labels rule, source, priority, tags, hostname,
+#     k8s_ns_name, k8s_pod_name; format json pushes the full Falco payload as the line).
+#   Disabling falcoctl install/follow: chart BREAKING-CHANGES.md ("Falcoctl support").
+
+image:
+  registry: docker.io
+  repository: falcosecurity/falco
+  tag: "0.45.2"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+driver:
+  enabled: true
+  kind: modern_ebpf
+  modernEbpf:
+    leastPrivileged: false
+    bufSizePreset: 4
+    # 32 CPUs / 8 = 4 ring buffers x 8 MB = 32 MB instead of 16 x 8 MB at the default 2.
+    cpusForEachBuffer: 8
+
+collectors:
+  enabled: true
+  containerEngine:
+    enabled: true
+    # Only the CRI engine on k3s's containerd socket. Docker is off on purpose:
+    # the WSL2 host's Docker (k6 generators) is not part of the cluster.
+    engines:
+      docker:
+        enabled: false
+      podman:
+        enabled: false
+      containerd:
+        enabled: false
+      cri:
+        enabled: true
+        sockets: ["/run/k3s/containerd/containerd.sock"]
+      lxc:
+        enabled: false
+      libvirt_lxc:
+        enabled: false
+      bpm:
+        enabled: false
+  # No k8s-metacollector: pod name and namespace come from the CRI socket.
+  kubernetes:
+    enabled: false
+
+# Use the rules and container plugin shipped in the pinned Falco image instead of
+# pulling floating OCI artifacts (falco-rules:5) at runtime; also saves the sidecar.
+falcoctl:
+  image:
+    tag: "0.14.3"
+  artifact:
+    install:
+      enabled: false
+    follow:
+      enabled: false
+
+falcosidekick:
+  enabled: true
+  replicaCount: 1
+  image:
+    registry: docker.io
+    repository: falcosecurity/falcosidekick
+    tag: "2.35.1"
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  webui:
+    enabled: false
+  config:
+    loki:
+      hostport: "http://loki.monitoring.svc:3100"
+      endpoint: "/loki/api/v1/push"
+      format: "json"
+      grafanaDashboard:
+        enabled: false
