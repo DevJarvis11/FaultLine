@@ -2,7 +2,7 @@
 
 import argparse
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 SUITES = ("replay", "live-quick", "live-full")
 
@@ -31,7 +31,34 @@ def _not_implemented(command: str) -> int:
     return 1
 
 
+def cmd_migrate(_args: argparse.Namespace) -> int:
+    from faultline.config import load_env, load_models
+    from faultline.db.migrate import discover, run_migrate
+
+    env = load_env()
+    if env.database_url is None:
+        print("faultline migrate: DATABASE_URL is not set", file=sys.stderr)
+        return 1
+    embed_dim = load_models(env=env).roles.embedding.dimensions
+    ran = run_migrate(env.database_url.get_secret_value(), discover(), embed_dim)
+    print(f"applied: {', '.join(ran) if ran else 'nothing (up to date)'}; checkpointer ready")
+    return 0
+
+
+def cmd_check_models(_args: argparse.Namespace) -> int:
+    from faultline.llm.check import main_check_models
+
+    return main_check_models()
+
+
+HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
+    "migrate": cmd_migrate,
+    "check-models": cmd_check_models,
+}
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     """Parse arguments and dispatch; exits with the command's status code."""
     args = build_parser().parse_args(argv)
-    sys.exit(_not_implemented(args.command))
+    handler = HANDLERS.get(args.command)
+    sys.exit(handler(args) if handler else _not_implemented(args.command))

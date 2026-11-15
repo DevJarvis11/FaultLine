@@ -1,5 +1,6 @@
 """Typed configuration loading: secrets from the environment, behaviour from YAML."""
 
+import re
 from pathlib import Path
 from typing import Any, Literal, Self
 
@@ -153,3 +154,76 @@ def load_settings(
 
 def load_service_catalog(path: Path = CONFIG_DIR / "service_catalog.yaml") -> ServiceCatalog:
     return ServiceCatalog.model_validate(_read_yaml(path))
+
+
+# ---- config/models.yaml (DESIGN: Model configuration) ----
+
+ChatRoleName = Literal["triage", "investigator", "report"]
+ReasoningEffort = Literal["low", "medium", "high"]
+
+_PLACEHOLDER = re.compile(r"^\$\{([A-Z0-9_]+)\}$")
+
+
+class ConfigError(RuntimeError):
+    """A required configuration value is missing."""
+
+
+class ProviderConfig(_Strict):
+    base_url: str | None
+    api_key: SecretStr | None
+    timeout_s: float = Field(gt=0)
+    max_retries: int = Field(ge=0)
+
+    def require(self) -> tuple[str, str]:
+        """Return (base_url, api_key) or fail if `.env` does not provide them."""
+        if not self.base_url:
+            raise ConfigError("LLM_BASE_URL is not set")
+        if self.api_key is None:
+            raise ConfigError("LLM_API_KEY is not set")
+        return self.base_url.rstrip("/"), self.api_key.get_secret_value()
+
+
+class ChatRole(_Strict):
+    model: str
+    temperature: float = Field(ge=0, le=2)
+    max_tokens: int = Field(gt=0)
+    reasoning_effort: ReasoningEffort
+
+
+class EmbeddingRole(_Strict):
+    model: str
+    dimensions: int = Field(gt=0)
+
+
+class Roles(_Strict):
+    triage: ChatRole
+    investigator: ChatRole
+    report: ChatRole
+    embedding: EmbeddingRole
+
+    def chat_roles(self) -> dict[ChatRoleName, ChatRole]:
+        return {"triage": self.triage, "investigator": self.investigator, "report": self.report}
+
+
+class ModelsConfig(_Strict):
+    provider: ProviderConfig
+    roles: Roles
+    fallbacks: dict[ChatRoleName, str] = {}
+
+
+def _fill_placeholders(value: Any, env: dict[str, Any]) -> Any:
+    """Replace whole-string `${NAME}` values with env values (None when unset)."""
+    if isinstance(value, dict):
+        return {k: _fill_placeholders(v, env) for k, v in value.items()}
+    if isinstance(value, str) and (m := _PLACEHOLDER.match(value)):
+        found = env.get(m.group(1).lower())
+        return found.get_secret_value() if isinstance(found, SecretStr) else found
+    return value
+
+
+def load_models(
+    path: Path = CONFIG_DIR / "models.yaml", env: EnvSettings | None = None
+) -> ModelsConfig:
+    env = env if env is not None else load_env()
+    raw = _fill_placeholders(_read_yaml(path), dict(env))
+    return ModelsConfig.model_validate(raw)

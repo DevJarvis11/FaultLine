@@ -1,15 +1,16 @@
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 from faultline.cli import main
 
+REPO = Path(__file__).resolve().parents[1]
+
 COMMANDS = [
     ["serve"],
     ["mcp"],
-    ["migrate"],
-    ["check-models"],
     ["index-runbooks"],
     ["eval", "--suite", "replay"],
     ["eval", "--suite", "live-quick"],
@@ -56,10 +57,53 @@ def test_unknown_command_rejected() -> None:
 
 def test_module_entry_point() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "faultline", "check-models"],
+        [sys.executable, "-m", "faultline", "mcp"],
         capture_output=True,
         text=True,
         check=False,
     )
     assert result.returncode == 1
     assert "not implemented in this session" in result.stderr
+
+
+def test_migrate_without_database_url_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)  # no .env here
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    with pytest.raises(SystemExit) as exc:
+        main(["migrate"])
+    assert exc.value.code == 1
+    assert "DATABASE_URL is not set" in capsys.readouterr().err
+
+
+def test_check_models_without_gateway_env_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "config").symlink_to(REPO / "config")
+    monkeypatch.chdir(tmp_path)  # no .env here
+    for key in ("LLM_BASE_URL", "LLM_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    with pytest.raises(SystemExit) as exc:
+        main(["check-models"])
+    assert exc.value.code == 1
+    assert "LLM_BASE_URL is not set" in capsys.readouterr().err
+
+
+def test_migrate_runs_with_repo_config(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_run(url: str, migrations: list[object], embed_dim: int) -> list[str]:
+        seen.update(url=url, n=len(migrations), dim=embed_dim)
+        return ["001_core", "002_vectors"]
+
+    monkeypatch.chdir(REPO)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@db/x")
+    monkeypatch.setattr("faultline.db.migrate.run_migrate", fake_run)
+    with pytest.raises(SystemExit) as exc:
+        main(["migrate"])
+    assert exc.value.code == 0
+    assert seen == {"url": "postgresql://u:p@db/x", "n": 2, "dim": 2560}
+    assert "001_core, 002_vectors" in capsys.readouterr().out
