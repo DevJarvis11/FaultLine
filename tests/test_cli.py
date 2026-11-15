@@ -77,6 +77,19 @@ def test_migrate_without_database_url_fails(
     assert "DATABASE_URL is not set" in capsys.readouterr().err
 
 
+def test_check_models_without_gateway_env_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "config").symlink_to(REPO / "config")
+    monkeypatch.chdir(tmp_path)  # no .env here
+    for key in ("LLM_BASE_URL", "LLM_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    with pytest.raises(SystemExit) as exc:
+        main(["check-models"])
+    assert exc.value.code == 1
+    assert "LLM_BASE_URL is not set" in capsys.readouterr().err
+
+
 def test_migrate_runs_with_repo_config(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

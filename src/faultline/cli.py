@@ -45,8 +45,15 @@ def cmd_migrate(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_check_models(_args: argparse.Namespace) -> int:
+    from faultline.llm.check import main_check_models
+
+    return main_check_models()
+
+
 HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "migrate": cmd_migrate,
+    "check-models": cmd_check_models,
 }
 
 
