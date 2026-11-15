@@ -1,0 +1,35 @@
+# Cilium Helm values for the Faultline lab (k3s on WSL2).
+# Chart: cilium/cilium 1.20.4 (repo https://helm.cilium.io). Images are pinned by the chart version.
+# Install:
+#   helm upgrade --install cilium cilium/cilium --version 1.20.4 \
+#     --namespace kube-system -f deploy/lab/cilium-values.yaml
+# Sources:
+#   k3s guide: https://docs.cilium.io/en/v1.20/installation/k3s/
+#   Hubble metrics: https://docs.cilium.io/en/v1.20/observability/metrics/
+#   Value names checked with `helm show values cilium/cilium --version 1.20.4`.
+
+# k3s default pod CIDR (Cilium k3s guide).
+ipam:
+  operator:
+    clusterPoolIPv4PodCIDRList: ["10.42.0.0/16"]
+
+# Single-node lab: the chart default of 2 replicas leaves one Pending (pod anti-affinity).
+operator:
+  replicas: 1
+
+# k3s keeps its own kube-proxy, so no kube-proxy replacement.
+kubeProxyReplacement: "false"
+
+hubble:
+  enabled: true
+  metrics:
+    # Served by each agent on hubble.metrics.port (chart default 9965).
+    enabled:
+      - dns
+      - drop
+      - flow
+  # Lean lab: relay and UI off.
+  relay:
+    enabled: false
+  ui:
+    enabled: false
