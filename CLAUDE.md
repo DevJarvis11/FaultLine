@@ -40,6 +40,7 @@
 - Simulated attack traffic targets only this lab.
 - Never commit secrets. .env is git-ignored; .env.example has no values.
 - Ask before deleting files, branches, namespaces or data.
+- Never read, print or paste the contents of .env or ~/secrets. Load .env only inside commands: set -a; source .env; set +a
 
 ## Quality rules
 - Write tests first for: redaction, the verifier, OPA policies, idempotency
