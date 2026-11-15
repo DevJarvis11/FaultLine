@@ -89,6 +89,13 @@ def test_catalog_rejects_unknown_approver_role() -> None:
         ServiceCatalog.model_validate(data)
 
 
+def test_catalog_rejects_unknown_action_kind() -> None:
+    data = _catalog_dict()
+    data["action_roles"]["delete_cluster"] = ["sre"]
+    with pytest.raises(ValidationError):
+        ServiceCatalog.model_validate(data)
+
+
 def _settings_dict() -> dict[str, Any]:
     data: dict[str, Any] = yaml.safe_load((REPO_CONFIG / "settings.yaml").read_text())
     return data

@@ -7,6 +7,8 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from faultline.schemas import ActionKind
+
 Mode = Literal["shadow", "normal"]
 
 CONFIG_DIR = Path("config")
@@ -114,7 +116,7 @@ class ServiceCatalog(_Strict):
     services: dict[str, ServiceEntry]
     teams: dict[str, Team]
     approvers: dict[str, list[str]]
-    action_roles: dict[str, list[str]]
+    action_roles: dict[ActionKind, list[str]]
 
     @model_validator(mode="after")
     def _roles_are_known_teams(self) -> Self:
