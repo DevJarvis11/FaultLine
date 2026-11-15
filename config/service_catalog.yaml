@@ -1,0 +1,28 @@
+services:
+  frontend:              {namespace: boutique, team: sre, public: true}
+  checkoutservice:       {namespace: boutique, team: sre}
+  paymentservice:        {namespace: boutique, team: sre}
+  cartservice:           {namespace: boutique, team: sre}
+  redis-cart:            {namespace: boutique, team: sre}
+  productcatalogservice: {namespace: boutique, team: sre}
+  currencyservice:       {namespace: boutique, team: sre}
+  shippingservice:       {namespace: boutique, team: sre}
+  emailservice:          {namespace: boutique, team: sre}
+  recommendationservice: {namespace: boutique, team: sre}
+  adservice:             {namespace: boutique, team: sre}
+
+teams:
+  sre:     {slack_mention: "<SLACK_USER_OR_GROUP_ID>"}
+  soc:     {slack_mention: "<SLACK_USER_OR_GROUP_ID>"}
+  network: {slack_mention: "<SLACK_USER_OR_GROUP_ID>"}
+
+approvers:                 # Slack user ID -> roles (inputs)
+  "<SLACK_USER_ID>": [sre, soc, network]
+
+action_roles:              # which role may approve each action
+  git_revert:     [sre]
+  scale_out:      [sre]
+  rate_limit:     [sre, soc]
+  block_source:   [soc]
+  quarantine_pod: [soc]
+  page_team:      [sre, soc, network]

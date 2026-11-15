@@ -1,0 +1,28 @@
+incident:
+  dedupe_window_minutes: 30      # same incident key within this window = same incident
+  evidence_lookback_minutes: 30  # before the first alert
+  baseline_window_minutes: 60    # comparison window for traffic shape
+evidence:
+  max_tokens_total: 6000
+  collector_timeout_seconds: 10
+  top_n: 10
+triage:
+  timeout_seconds: 15
+investigator:
+  max_tool_calls: 6
+  budget_seconds: 120
+verifier:
+  min_confidence: 0.6
+  max_attempts: 2
+approval:
+  expiry_minutes: 15
+actions:
+  max_per_incident: 2
+  block_min_confidence: 0.75
+  block_min_prefix_v4: 24
+  block_ttl_minutes: 60
+  rate_limit_ttl_minutes: 60
+  scale_max_replicas: 5
+recovery:
+  watch_minutes: 10
+mode: shadow   # shadow or normal; FAULTLINE_MODE overrides
