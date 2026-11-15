@@ -1,6 +1,6 @@
 # Progress
 
-Resume point: Session 2. Kernel gate PASSED (modprobe sch_ingress cls_bpf algif_hash loaded, 2026-11-15). k3s v1.37.2+k3s1 installed but crash-looping: kubelet "Failed to start ContainerManager: system validation failed - wrong number of fields (expected 6, got 7)". Cause: Docker Desktop's 9p mount at /Docker/host has an unescaped space ("C:\Program Files\...") in its options, so that /proc/self/mounts line has 7 fields. Owner ran the fix (drop-in /etc/systemd/system/k3s.service.d/10-docker-desktop-mount.conf: `ExecStartPre=-/bin/umount /Docker/host`). Session 2 tasks 1-3 done (4a4f14a, 2371d54, 64d9c58, 39363e4). BLOCKED on the done-when client-IP check: Docker Desktop containers reach the host only through a proxy (they arrive as 127.0.0.1) or time out. Traefik itself keeps client IPs (host curls bound to 3 interfaces logged 3 distinct ClientHost values). Waiting for the owner to choose a fix.
+Resume point: Session 3, first task (Sessions 1-2 done; cluster-free parts of 5-7 merged from the parallel track).
 
 Parallel track (owner approved 2026-11-15, an exception to "one session at a time"): builder in a git worktree builds the cluster-free parts of Sessions 5 to 7 (OPA policies and client, migration code, models.yaml, model client, check-models, redaction, size limits, evidence IDs). It merges into main after Session 2. Live checks (migrate, the llm_calls row, packs on live data) stay with their sessions.
 
@@ -23,12 +23,12 @@ Parallel track (owner approved 2026-11-15, an exception to "one session at a tim
 | --- | --- | --- |
 | 0 Prerequisites (owner) | done | Filled in by the owner before starting |
 | 1 Repository scaffold | done | 5 commits f870c1d..76c99ae; CI green run 43725339525 |
-| 2 Cluster base | blocked | Cilium + Traefik up; client-IP check blocked by Docker Desktop networking |
+| 2 Cluster base | done | Cilium 1.20.4, Traefik 42.4.0; native Docker Engine 29.9.3 replaced Docker Desktop integration (owner's choice) |
 | 3 GitOps, app, observability | not started | |
 | 4 Security and scenario tooling | not started | |
-| 5 Data, policy, LLMOps | not started | |
-| 6 Model layer | not started | |
-| 7 Evidence | not started | |
+| 5 Data, policy, LLMOps | partial | OPA policies, client, migration code merged; Postgres, OPA server, MLflow, live migrate pending |
+| 6 Model layer | partial | models.yaml, client, check-models merged (live gateway check passed); llm_calls DB row and plan-then-execute pending |
+| 7 Evidence | partial | redaction, size limits, evidence IDs merged; collectors, traffic shape, live packs pending |
 | 8 Reasoning | not started | |
 | 9 Slack and approval | not started | |
 | 10 Actions | not started | |
@@ -51,7 +51,10 @@ Parallel track (owner approved 2026-11-15, an exception to "one session at a tim
 - Memory used/available: 3.0G/7.4G at start, 3.7G/6.7G after Cilium, 3.8G/6.7G after Traefik.
 - Open: Hubble dns metrics appear only once DNS L7 visibility policies exist; clients reach Traefik on 8000/8443, not 80/443.
 
-### Parallel track (Sessions 5-7, cluster-free; branch worktree-agent-ad201dd934b59d63d, not merged yet)
+- Done-when (after native Docker): `deploy/lab/check-client-ip.sh` -> ClientHost 172.20.0.2 and 172.21.0.2, PASS: 2 distinct client IPs (target is the docker0 gateway; WSL2 runs mirrored-style interfaces eth2 192.168.1.8). `cilium status`: Cilium OK, Operator OK. `hubble observe --last 3` inside the agent shows FORWARDED flows. Pod DNS and egress work after Docker's iptables changes (busybox test pod). Memory: 3.8G used, 6.6G available.
+- Merge of the parallel track (db0466c): ruff clean, mypy clean (17 files), pytest 159 passed, opa test 11/11.
+
+### Parallel track (Sessions 5-7, cluster-free; merged into main as db0466c)
 - Commits ba6a516 (S5 OPA policies + client), 4ae9bce (S6 models.yaml + loader), 8d807fe (S5 migrations + migrate), 02ab247 (S7 redaction, size limits, evidence IDs), e5415eb (S6 client, check-models, llm_calls).
 - Main session re-ran checks in the worktree: ruff clean; mypy clean (17 files); pytest 159 passed; opa test 11/11.
 - Builder's own choices, not from the spec (owner to review): reasoning effort counts as effective when high uses >= 1.5x low's completion tokens; packs estimate 3 chars per token for the budget; missing tool calling warns and points to plan-then-execute instead of failing.
@@ -71,4 +74,4 @@ Parallel track (owner approved 2026-11-15, an exception to "one session at a tim
 
 ## Blocked
 <!-- Item, file, what it needed, why blocked. -->
-- Session 2 done-when check (deploy/lab/check-client-ip.sh): needs containers with their own source IPs. Docker Desktop proxies container traffic to the host (127.0.0.1). Owner's choice: native Docker Engine in WSL2, generators as k3s pods, or relax the check.
+- (resolved) Session 2 client-IP check: Docker Desktop proxied container traffic (127.0.0.1). The owner chose native Docker Engine 5:29.9.3-1~ubuntu.22.04~jammy (https://docs.docker.com/engine/install/ubuntu/), Docker Desktop WSL integration off for Ubuntu, ~/.docker/config.json credsStore removed (backup config.json.desktop-bak).
