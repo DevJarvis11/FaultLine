@@ -5,7 +5,9 @@
 set -euo pipefail
 
 export KUBECONFIG="${KUBECONFIG:-${HOME}/.kube/k3s.yaml}"
-TARGET="${1:-http://host.docker.internal:8000/}"
+# Native Docker Engine in WSL2: containers reach Traefik (hostNetwork) via the docker0 gateway.
+DOCKER0_IP="$(ip -4 -o addr show docker0 | awk '{print $4}' | cut -d/ -f1)"
+TARGET="${1:-http://${DOCKER0_IP}:8000/}"
 IMAGE="curlimages/curl:8.10.1"
 NETS=(fl-ipcheck-a fl-ipcheck-b)
 
