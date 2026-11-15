@@ -1,0 +1,55 @@
+# Traefik Helm values for the Faultline lab.
+# Chart: traefik/traefik 42.4.0 (repo https://traefik.github.io/charts), Traefik v3.7.18.
+# Install:
+#   helm upgrade --install traefik traefik/traefik --version 42.4.0 \
+#     --namespace ingress --create-namespace -f deploy/lab/traefik-values.yaml
+# Sources:
+#   Chart values: https://github.com/traefik/traefik-helm-chart/blob/v42.4.0/traefik/values.yaml
+#     (checked with `helm show values traefik/traefik --version 42.4.0`)
+#   Access logs: https://doc.traefik.io/traefik/reference/install-configuration/observability/logs-and-accesslogs/
+
+image:
+  tag: v3.7.18
+
+# Client-IP preservation: Traefik runs in the host network namespace, so there is
+# no NAT between clients and Traefik. k3s ServiceLB (klipper) relies on hostPort,
+# which Cilium does not provide without kube-proxy replacement (HostPort: Disabled).
+hostNetwork: true
+
+deployment:
+  # Resolve cluster DNS names while on the host network.
+  dnsPolicy: ClusterFirstWithHostNet
+
+# Single node with host ports: the old pod must stop before the new one binds.
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+    maxSurge: 0
+
+# No LoadBalancer: clients reach Traefik on the node's host ports directly.
+service:
+  spec:
+    type: ClusterIP
+
+ports:
+  # Entry point names (map keys): web (8000), websecure (8443), traefik (8080), metrics.
+  metrics:
+    # Avoid node-exporter's 9100 on the host network (chart comment).
+    port: 9101
+    exposedPort: 9101
+
+accessLog:
+  enabled: true
+  format: json
+  fields:
+    headers:
+      defaultMode: drop
+      names:
+        User-Agent: keep
+
+metrics:
+  prometheus:
+    entryPoint: metrics
+    addEntryPointsLabels: true
+    addServicesLabels: true
