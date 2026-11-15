@@ -24,10 +24,12 @@ hubble:
   enabled: true
   metrics:
     # Served by each agent on hubble.metrics.port (chart default 9965).
+    # labelsContext adds source_namespace / destination_namespace labels
+    # (https://docs.cilium.io/en/v1.20/observability/metrics/, Context Options).
     enabled:
       - dns
-      - drop
-      - flow
+      - drop:labelsContext=source_namespace,destination_namespace
+      - flow:labelsContext=source_namespace,destination_namespace
   # Lean lab: relay and UI off.
   relay:
     enabled: false
