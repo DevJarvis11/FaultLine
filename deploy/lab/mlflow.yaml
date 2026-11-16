@@ -1,0 +1,138 @@
+# MLflow tracking server for eval runs (Session 5), namespace llmops. Plain manifest: MLflow
+# publishes no official Helm chart, only the image.
+# Image: ghcr.io/mlflow/mlflow:v3.18.0, pinned by digest; source: github.com/mlflow/mlflow
+# releases (v3.18.0) and the ghcr.io registry API.
+# The image is built from docker/Dockerfile at v3.18.0: `pip install mlflow==$VERSION` only,
+# so it has no PostgreSQL driver (drivers are only in the `db` extra / the much larger -full
+# image). Its SQLAlchemy maps postgresql:// to the psycopg (v3) dialect (verified: the server
+# failed with "No module named 'psycopg'"). The smallest pinned fix: an init container from
+# the same image installs psycopg[binary]==3.3.9 (wheels only, same version as Faultline's
+# uv.lock) into an emptyDir, put on PYTHONPATH.
+# Server flags verified in mlflow/cli/__init__.py and mlflow/utils/cli_args.py at v3.18.0:
+# --backend-store-uri (env MLFLOW_BACKEND_STORE_URI), --serve-artifacts (default on),
+# --artifacts-destination, --workers, --host, --allowed-hosts (env
+# MLFLOW_SERVER_ALLOWED_HOSTS, Host-header check of the default uvicorn server).
+# The DB password comes from Secret llmops/mlflow-db, copied there by install-data.sh.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mlflow-artifacts
+  namespace: llmops
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow
+  namespace: llmops
+  labels:
+    app.kubernetes.io/name: mlflow
+spec:
+  selector:
+    app.kubernetes.io/name: mlflow
+  ports:
+    - name: http
+      port: 5000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow
+  namespace: llmops
+  labels:
+    app.kubernetes.io/name: mlflow
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mlflow
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mlflow
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      initContainers:
+        - name: pg-driver
+          image: ghcr.io/mlflow/mlflow:v3.18.0@sha256:257204c77980b0f3450a26eb6089e487603fcdd4509529eadaf88f90669f5c13
+          command:
+            - pip
+            - install
+            - --no-cache-dir
+            - --disable-pip-version-check
+            - "--only-binary=:all:"
+            - --target=/deps
+            - psycopg[binary]==3.3.9
+          env:
+            - name: HOME
+              value: /tmp
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 256Mi}
+          volumeMounts:
+            - name: deps
+              mountPath: /deps
+      containers:
+        - name: mlflow
+          image: ghcr.io/mlflow/mlflow:v3.18.0@sha256:257204c77980b0f3450a26eb6089e487603fcdd4509529eadaf88f90669f5c13
+          command:
+            - mlflow
+            - server
+            - --host=0.0.0.0
+            - --port=5000
+            - --workers=1
+            - --serve-artifacts
+            - --artifacts-destination=/mlflow/artifacts
+          env:
+            - name: HOME
+              value: /tmp
+            - name: PYTHONPATH
+              value: /deps
+            - name: MLFLOW_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: mlflow-db, key: password}
+            # Expanded by the kubelet at container start; the password is never in Git.
+            - name: MLFLOW_BACKEND_STORE_URI
+              value: postgresql://mlflow:$(MLFLOW_DB_PASSWORD)@postgres.faultline.svc.cluster.local:5432/mlflow
+            - name: MLFLOW_SERVER_ALLOWED_HOSTS
+              value: mlflow.llmops.svc.cluster.local:5000,mlflow.llmops.svc:5000,mlflow.llmops:5000,mlflow:5000,localhost:*,127.0.0.1:*
+          ports:
+            - name: http
+              containerPort: 5000
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            requests: {cpu: 50m, memory: 256Mi}
+            limits: {memory: 768Mi}
+          volumeMounts:
+            - name: deps
+              mountPath: /deps
+              readOnly: true
+            - name: artifacts
+              mountPath: /mlflow/artifacts
+      volumes:
+        - name: deps
+          emptyDir: {}
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: mlflow-artifacts

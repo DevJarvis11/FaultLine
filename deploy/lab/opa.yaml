@@ -1,0 +1,79 @@
+# OPA policy server for Faultline (Session 5). Plain manifest: a single stateless container
+# needs no chart. Image: openpolicyagent/opa:1.22.4-static (matches the opa CLI 1.22.4; the
+# static variant is the smallest documented image), pinned by digest; source: Docker Hub
+# registry API, hub.docker.com/r/openpolicyagent/opa/tags. The image runs as user 1000:1000.
+# The policy ConfigMap `opa-policies` is created by deploy/lab/install-data.sh from
+# policies/actions.rego (the test file is not loaded).
+apiVersion: v1
+kind: Service
+metadata:
+  name: opa
+  namespace: faultline
+  labels:
+    app.kubernetes.io/name: opa
+spec:
+  selector:
+    app.kubernetes.io/name: opa
+  ports:
+    - name: http
+      port: 8181
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opa
+  namespace: faultline
+  labels:
+    app.kubernetes.io/name: opa
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opa
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: opa
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: opa
+          image: openpolicyagent/opa:1.22.4-static@sha256:12cecac5a174368f7d3f09d3a19d040ebe0c91d576e520335ae7a985a26e39d3
+          args:
+            - run
+            - --server
+            # OPA 1.x listens on localhost:8181 by default; bind all interfaces in the pod.
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --skip-version-check
+            - /policies/actions.rego
+          ports:
+            - name: http
+              containerPort: 8181
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - name: policies
+              mountPath: /policies
+              readOnly: true
+      volumes:
+        - name: policies
+          configMap:
+            name: opa-policies

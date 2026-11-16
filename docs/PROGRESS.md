@@ -1,8 +1,15 @@
 # Progress
 
-Resume point: Session 5, first task (Session 4 done; Session 5 cluster-free parts already merged) (Sessions 1-2 done; cluster-free parts of 5-7 merged from the parallel track).
+Resume point: BLOCKED on cluster networking (see Blocked). After the owner fixes it: finish Session 5 MLflow checks, then Fable work (Session 6 plan-then-execute, Session 7 traffic shape). Slack UI already merged (Session 9 early) (Sessions 1-2 done; cluster-free parts of 5-7 merged from the parallel track).
 
 Parallel track (owner approved 2026-11-15, an exception to "one session at a time"): builder in a git worktree builds the cluster-free parts of Sessions 5 to 7 (OPA policies and client, migration code, models.yaml, model client, check-models, redaction, size limits, evidence IDs). It merges into main after Session 2. Live checks (migrate, the llm_calls row, packs on live data) stay with their sessions.
+
+## Session 5 plan (Data, policy, LLMOps, Opus; live parts only)
+Owner kept the 10 GB WSL2 limit (2026-11-15): modest limits, check memory after each install.
+1. PostgreSQL with pgvector in `faultline` (pinned image, PVC on local-path, passwords only in k8s Secrets); dedicated `faultline` user; separate `mlflow` database and user. `faultline migrate` against it via port-forward, DATABASE_URL passed in the process environment (not written to .env).
+2. OPA server in `faultline` (image matching CLI 1.22.4) loading policies/actions.rego; answer a test query at /v1/data/faultline/actions.
+3. MLflow in `llmops` with the PostgreSQL backend and local artifact storage on a PVC.
+4. Done-when: `faultline migrate` succeeds; `opa test` passes; MLflow UI returns 200.
 
 ## Session 4 plan (Security and scenario tooling, Opus)
 1. Falco (modern eBPF driver, k3s containerd socket /run/k3s/containerd/containerd.sock) and Falcosidekick to Loki, in `security`. Stop and ask if Falco cannot start on WSL2 (builder A).
@@ -37,11 +44,11 @@ Owner inputs (2026-11-15): lab hostname shop.faultline.lab; faultline-gitops now
 | 2 Cluster base | done | Cilium 1.20.4, Traefik 42.4.0; native Docker Engine 29.9.3 replaced Docker Desktop integration (owner's choice) |
 | 3 GitOps, app, observability | done | Shop at http://shop.faultline.lab:8000 (/etc/hosts 172.19.0.1); Argo CD 3.6.1, kps 93.3.0, Loki 3.6.18, Alloy 1.22.0 |
 | 4 Security and scenario tooling | done | Falco 0.45.2 modern eBPF; k6 2.4.0 on fl-traffic 172.31.250.0/24 |
-| 5 Data, policy, LLMOps | partial | OPA policies, client, migration code merged; Postgres, OPA server, MLflow, live migrate pending |
+| 5 Data, policy, LLMOps | partial | Postgres, migrate, OPA done live; MLflow blocked by node IP change | OPA policies, client, migration code merged; Postgres, OPA server, MLflow, live migrate pending |
 | 6 Model layer | partial | models.yaml, client, check-models merged (live gateway check passed); llm_calls DB row and plan-then-execute pending |
 | 7 Evidence | partial | redaction, size limits, evidence IDs merged; collectors, traffic shape, live packs pending |
 | 8 Reasoning | not started | |
-| 9 Slack and approval | not started | |
+| 9 Slack and approval | partial | Slack UI merged early (63a6f0c, Fable); live Slack, DB store, resume pending |
 | 10 Actions | not started | |
 | 11 Scenarios | not started | |
 | 12 Eval harness | not started | |
@@ -64,6 +71,14 @@ Owner inputs (2026-11-15): lab hostname shop.faultline.lab; faultline-gitops now
 
 - Done-when (after native Docker): `deploy/lab/check-client-ip.sh` -> ClientHost 172.20.0.2 and 172.21.0.2, PASS: 2 distinct client IPs (target is the docker0 gateway; WSL2 runs mirrored-style interfaces eth2 192.168.1.8). `cilium status`: Cilium OK, Operator OK. `hubble observe --last 3` inside the agent shows FORWARDED flows. Pod DNS and egress work after Docker's iptables changes (busybox test pod). Memory: 3.8G used, 6.6G available.
 - Merge of the parallel track (db0466c): ruff clean, mypy clean (17 files), pytest 159 passed, opa test 11/11.
+
+### Session 5 live (2026-11-16, Opus)
+- Plain pinned manifests (no official charts): deploy/lab/postgres.yaml, opa.yaml, mlflow.yaml, install-data.sh (generates passwords with openssl over stdin, never regenerates existing Secrets; no secrets in Git). Images by tag and digest: pgvector/pgvector:0.8.7-pg17-trixie (PostgreSQL 17.12), openpolicyagent/opa:1.22.4-static, ghcr.io/mlflow/mlflow:v3.18.0 (no PG driver; init container installs psycopg[binary]==3.3.9, matching uv.lock, since its SQLAlchemy uses psycopg 3).
+- Postgres: Secrets postgres-superuser, faultline-db, mlflow-db (copied to llmops); superuser pre-creates the vector extension; user faultline owns its tables in public only; user mlflow owns database mlflow. Postgres uses 23Mi.
+- `faultline migrate` via port-forward (DATABASE_URL only in the command env): "applied: 001_core, 002_vectors; checkpointer ready"; second run "applied: nothing (up to date)"; 17 tables incl. 4 LangGraph checkpoint tables.
+- OPA /health 200; allow case (revert for bad change) allow=true, deny=[]; deny case (block, low confidence) allow=false with reason; `opa test` 11/11.
+- Service URLs: postgres.faultline.svc.cluster.local:5432, OPA_URL=http://opa.faultline.svc.cluster.local:8181, MLFLOW_TRACKING_URI=http://mlflow.llmops.svc.cluster.local:5000 (.env not edited).
+- Slack UI (Fable, merged 63a6f0c): config/slack_manifest.yaml, src/faultline/slack/ (blocks, approvals, idempotency, app); 56 new tests, suite 215 passed, mypy strict clean. Button value = action UUID only; shadow mode shows no buttons; approver check fails closed. Sources: docs.slack.dev manifest, Block Kit, interaction payloads, modals; slack-bolt 1.30.0 / slack-sdk 3.47.0 source.
 
 ### Session 4 (2026-11-15, Opus)
 - Falco chart 9.2.2 (falco 0.45.2, container plugin 0.7.6) in `security`, `driver.kind: modern_ebpf` (log: "Opening 'syscall' source with modern BPF probe."), CRI socket /run/k3s/containerd/containerd.sock via `collectors.containerEngine.engines.cri.sockets` (Docker engine off), `cpusForEachBuffer: 8`; falcoctl install/follow off (image's bundled rules, no floating falco-rules artifact). Falcosidekick 2.35.1 (subchart 0.14.1), 1 replica, no UI/Redis, Loki output hostport http://loki.monitoring.svc:3100, format json. Falco 91Mi, sidekick 13Mi.
@@ -112,4 +127,5 @@ Owner inputs (2026-11-15): lab hostname shop.faultline.lab; faultline-gitops now
 
 ## Blocked
 <!-- Item, file, what it needed, why blocked. -->
+- (open, 2026-11-16) Cluster networking: k3s node InternalIP and the `kubernetes` Service endpoint are still 192.168.1.8, but eth2 is now 172.18.1.19/16 (laptop changed network). Pods time out on 10.43.0.1:443; cilium-operator, traefik, kube-state-metrics, node-exporter crash-loop; MLflow init cannot resolve pypi.org. Needs owner (sudo): restart k3s and decide on a stable node IP. Not changed by Claude per CLAUDE.md.
 - (resolved) Session 2 client-IP check: Docker Desktop proxied container traffic (127.0.0.1). The owner chose native Docker Engine 5:29.9.3-1~ubuntu.22.04~jammy (https://docs.docker.com/engine/install/ubuntu/), Docker Desktop WSL integration off for Ubuntu, ~/.docker/config.json credsStore removed (backup config.json.desktop-bak).
